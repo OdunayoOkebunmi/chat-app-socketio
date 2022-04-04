@@ -1,40 +1,47 @@
-const users = []
-const addUser = (username) => {
-  const name = username.trim().toLowerCase()
-  const existingUser = users.find((user) => user === name)
-  if (!username.trim()) return { error: 'name is required' }
-  if (existingUser) {
-    return { error: 'username is already taken' }
-  } else {
-    users.push(name)
-    return username
-  }
-
-}
 const chat = (io) => {
+  // middleware
+  io.use((socket, next) => {
+    const username = socket.handshake.auth.username
+    if (!username) {
+      return next(new Error('Invalid username'))
+    }
+    socket.username = username
+    next()
+  })
 
   io.on('connection', (socket) => {
-    // console.log('user connected', socket.id)
-    // listening for username
-    socket.on('username', (username, next) => {
-      console.log(username)
-      //io.emit('user joined', `${username} joined`)emits to all the client
-      let result = addUser(username)
-      if (result.error) {
-        return next(result.error)
+
+    let users = []
+    for (let [id, socket] of io.of('/').sockets) {
+      const existingUser = users.find((u) => u.username === socket.username)
+      if (existingUser) {
+        socket.emit('username taken')
+        socket.disconnect()
+        return
       } else {
-        io.emit('users', users)
-        socket.broadcast.emit('user joined', `${username} joined`)
-        //broadcast to everyone except the current user
+        users.push({
+          userId: id,
+          username: socket.username
+        })
       }
+    }
+    socket.emit('users', users)
+    // when a new user joins,notify existing user
+    socket.broadcast.emit('user connected', {
+      userId: socket.id,
+      username: socket.username
     })
     // listening for message
-    socket.on('message', message => {
-      io.emit('message', message)
+    socket.on('message', data => {
+      io.emit('message', data)
+    })
+    //  create typing event
+    socket.on('typing', (username) => {
+      socket.broadcast.emit('typing', `${username} is typing...`)
     })
     // disconnect
     socket.on('disconnect', () => {
-      console.log('user disconnected')
+      socket.broadcast.emit('user disconnected', socket.id)
     })
   })
 }
